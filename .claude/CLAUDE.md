@@ -15,7 +15,8 @@ ssh and git as an ssh-agent. The program is Swift on Apple's CryptoKit, for macO
   binaries, `files` lists a gate's files, and `lint/` holds the linters' configs.
 - `.githooks/`: the hooks that check each commit for the words of the local list and for secrets.
 - `.github/workflows/`: `ci.yml`, with `lint` and `tests`; `rules.yml` and `issues.yml`, the
-  toolkit's checks, which warn alone; and `words.yml`, the check for the list's words.
+  toolkit's checks, which warn alone; `words.yml`, the check for the list's words; and
+  `release.yml`, the release on a tag, with its page `release.md`.
 - `.github/pull_request_template.md` and `.github/ISSUE_TEMPLATE/`: the toolkit's, which its
   `tools/pin` writes, never edited here.
 - `.claude/`: this file, Claude Code's `settings.json` and the lint plugin's `lint-gates`.

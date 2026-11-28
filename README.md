@@ -101,6 +101,17 @@ Where `~/.config/ws/forbidden-words` exists, one word or phrase a line, they ref
 added lines, file names or message hold one. They name the lines, never the word. Where gitleaks
 is installed, they refuse a staged secret too.
 
+## Releases
+
+A tag `vX.Y.Z` on `main` publishes seward for a Mac on Apple silicon. mise's `github:` backend
+installs it, checked against GitHub's SHA-256 of the file and its attestation:
+
+```sh
+mise use -g github:zadykian/seward
+```
+
+[release.md](.github/workflows/release.md) says how a release is cut.
+
 ## License
 
 [MIT](LICENSE).
