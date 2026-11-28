@@ -1,0 +1,4 @@
+# The gate code beyond the lint plugin's defaults, which no gate runs while it differs from HEAD.
+# It holds .tools, the gates' tools and the linters' settings, and the package's manifest.
+.tools
+Package.swift
