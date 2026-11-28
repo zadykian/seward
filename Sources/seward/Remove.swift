@@ -24,8 +24,7 @@ enum Remove {
 
     /// Throws unless the regular file at `path` is a key file of seward's.
     private static func requireSeward(_ path: String) throws {
-        guard let contents = try KeyDirectory.regularFileContents(path), KeyFile.isSeward(contents)
-        else { throw RemoveError.notSeward(path) }
+        guard try KeyDirectory.sewardFileContents(path) != nil else { throw RemoveError.notSeward(path) }
     }
 
     /// Deletes the files and returns a line for each. A file that is not seward's is never deleted.

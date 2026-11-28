@@ -41,9 +41,7 @@ enum Keygen {
     /// The key of a file in place whose `.pub` is missing. Its own store holds it, whatever
     /// `--store` says.
     private static func loadKeyInPlace(_ path: String, name: KeyName, context: Context) throws -> SigningKey {
-        guard let contents = try KeyDirectory.regularFileContents(path), KeyFile.isSeward(contents) else {
-            throw KeygenError.notSeward(path)
-        }
+        guard let contents = try KeyDirectory.sewardFileContents(path) else { throw KeygenError.notSeward(path) }
         if KeyDirectory.exists(context.keys.publicKeyPath(name)) {
             throw KeygenError.pairInPlace(path, name)
         }

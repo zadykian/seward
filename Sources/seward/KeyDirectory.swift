@@ -16,9 +16,10 @@ struct KeyDirectory {
         return lstat(path, &info) == 0
     }
 
-    /// The contents of the regular file at `path`, or nil for anything else, as a link, a directory
-    /// or a pipe, which seward never follows or reads.
-    static func regularFileContents(_ path: String) throws -> Data? {
+    /// The contents of the regular file at `path` where it is seward's, up to `limit` bytes, or nil
+    /// for anything else: a link, a directory or a pipe, which seward never follows or reads, or
+    /// another tool's file, of which it reads no further than the tag.
+    static func sewardFileContents(_ path: String, upTo limit: Int = .max) throws -> Data? {
         var info = stat()
         guard lstat(path, &info) == 0 else { throw SystemError(path: path, code: errno) }
         guard info.st_mode & S_IFMT == S_IFREG else { return nil }
@@ -29,15 +30,29 @@ struct KeyDirectory {
         defer { close(descriptor) }
         guard fstat(descriptor, &info) == 0 else { throw SystemError(path: path, code: errno) }
         guard info.st_mode & S_IFMT == S_IFREG else { return nil }
+        return try sewardContents(of: descriptor, path: path, upTo: limit)
+    }
+
+    /// What is left of `descriptor`, up to `limit` bytes, where it starts with seward's tag, or nil
+    /// with nothing read past the tag's bytes: another tool's key never enters memory whole.
+    static func sewardContents(of descriptor: Int32, path: String, upTo limit: Int) throws -> Data? {
+        let head = try bytes(of: descriptor, path: path, upTo: min(limit, KeyFile.tag.utf8.count + 1))
+        guard KeyFile.isSeward(head) else { return nil }
+        return head + (try bytes(of: descriptor, path: path, upTo: limit - head.count))
+    }
+
+    /// Up to `limit` bytes of `descriptor`, fewer at its end.
+    private static func bytes(of descriptor: Int32, path: String, upTo limit: Int) throws -> Data {
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 4096)
-        while true {
-            let count = read(descriptor, &buffer, buffer.count)
+        while data.count < limit {
+            let count = read(descriptor, &buffer, min(buffer.count, limit - data.count))
             if count < 0 && errno == EINTR { continue }
             guard count >= 0 else { throw SystemError(path: path, code: errno) }
-            if count == 0 { return data }
+            if count == 0 { break }
             data.append(contentsOf: buffer[0..<count])
         }
+        return data
     }
 
     /// Makes the directory, 0700, where it is missing, and leaves one that exists as it is.
