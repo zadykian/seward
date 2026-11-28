@@ -10,6 +10,7 @@ struct Outcome: Equatable {
 enum Cli {
     static let usage = """
         usage: seward keygen [--store enclave|file] NAME
+               seward list
                seward --version
 
         """
@@ -21,6 +22,9 @@ enum Cli {
         }
         if arguments.first == "keygen" {
             return Keygen.run(Array(arguments.dropFirst()), context: context)
+        }
+        if arguments.first == "list" {
+            return List.run(Array(arguments.dropFirst()), context: context)
         }
         return Outcome(status: .usage, errors: usage)
     }

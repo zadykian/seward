@@ -16,7 +16,7 @@ import Testing
     @Test(arguments: [
         [],
         ["--help"],
-        ["list"],
+        ["unknown"],
         ["--version", "extra"],
         ["extra", "--version"],
         ["extra", "keygen", "work"],
