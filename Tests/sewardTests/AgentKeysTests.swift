@@ -156,4 +156,26 @@ struct ListedKey: Equatable {
             #expect(try signs(agent, with: first.blob, as: pub))
         }
     }
+
+    @Test func answerLoadsTheKeysThroughTheEnclaveItIsGiven() throws {
+        try withTemporaryDirectory { root throws in
+            let enclave = RecordingEnclave()
+            let context = self.context(root, enclave: enclave)
+            try #require(Cli.run(["keygen", "--store", "enclave", "work"], context: context).status == .success)
+            let loads = enclave.loads
+            var ends: [Int32] = [0, 0]
+            try #require(socketpair(AF_UNIX, SOCK_STREAM, 0, &ends) == 0)
+            defer { close(ends[0]) }
+            try AgentCommand.send(AgentWire.framed(Data([AgentWire.requestIdentities])), to: ends[0], path: "pair")
+            // The request is the connection's last, so that the agent answers it here and closes.
+            shutdown(ends[0], SHUT_WR)
+            AgentCommand.answer(ends[1], keys: context.keys, enclave: context.enclave, path: "pair")
+            let answer = try AgentWire.nextMessage { try AgentCommand.receive(upTo: $0, from: ends[0], path: "pair") }
+            var fields = AnswerFields(try #require(answer))
+            let type = try fields.byte()
+            let count = try fields.uint32()
+            #expect(type == AgentWire.identitiesAnswer && count == 1)
+            #expect(enclave.loads == loads + 1)
+        }
+    }
 }

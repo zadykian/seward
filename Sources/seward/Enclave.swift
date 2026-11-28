@@ -16,8 +16,8 @@ struct KeyAccess: Equatable {
 }
 
 /// The Secure Enclave, behind a protocol, so that a test sees what keygen asks of it and gets a
-/// software key in its place.
-protocol Enclave {
+/// software key in its place. The agent hands it to the thread of each connection.
+protocol Enclave: Sendable {
     var isAvailable: Bool { get }
     func makeKey(_ access: KeyAccess) throws -> SigningKey
     func loadKey(_ representation: Data) throws -> SigningKey
