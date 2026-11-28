@@ -9,8 +9,8 @@ use. A key of the `file` store can: its file holds it whole, and a copy of the f
 
 ## Status
 
-In development. `seward keygen`, `list`, `remove` and `--version` run. `agent`, below, is
-planned: [the issues](https://github.com/zadykian/seward/issues) hold the plan.
+In development. `seward keygen`, `list`, `remove`, `agent` and `--version` run:
+[the issues](https://github.com/zadykian/seward/issues) hold the rest of the plan.
 
 ## Commands
 
@@ -58,6 +58,30 @@ seward's.
 
 Deleting the file removes that copy alone: any other copy of the file, a backup's included, still
 signs on this Mac. Revoke the key at GitHub and in `authorized_keys`.
+
+## The agent
+
+`seward agent` serves the keys to ssh until a signal stops it. It takes a lock on
+`~/.ssh/seward.lock` first, then binds `~/.ssh/seward.sock`, 0600. It replaces a socket that
+nobody answers on, as a stopped agent leaves. It exits 1 where another agent holds the lock or
+answers on the socket, or where something other than a socket is at its path. It reads the keys at
+each request, so that a new key needs no restart.
+
+ssh takes a key from the agent by its `.pub`, in `~/.ssh/config`:
+
+```text
+Host github.com
+    IdentityAgent ~/.ssh/seward.sock
+    IdentitiesOnly yes
+    IdentityFile ~/.ssh/NAME.pub
+```
+
+`ssh-keygen -Y sign -f ~/.ssh/NAME.pub` signs through the agent that `SSH_AUTH_SOCK` names. The
+agent's lines go to standard error and to the unified log:
+
+```sh
+log show --predicate 'subsystem == "seward"'
+```
 
 ## Build and test
 
