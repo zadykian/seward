@@ -120,9 +120,17 @@ import Testing
                     // accept fails until they close.
                     let clients = try (0..<32).map { _ in try AgentClient(home.socket) }
                     try #require(eventually(within: 10) { logged() > before }, "\(agent.errors)")
-                    // The agent retries each tenth of a second, so a second's wait would log ten.
-                    Thread.sleep(forTimeInterval: 1)
-                    #expect(logged() == before + 1)
+                    // A descriptor that the agent gives back as it starts lets one more client in,
+                    // and the shortage after it has a line of its own. A retry comes each tenth of
+                    // a second, so the count holds for a second only where no retry logs.
+                    var seen = logged()
+                    let held = eventually(within: 20) {
+                        Thread.sleep(forTimeInterval: 1)
+                        let now = logged()
+                        defer { seen = now }
+                        return now == seen
+                    }
+                    #expect(held, "\(agent.errors)")
                     withExtendedLifetime(clients) {}
                 }
                 // The clients closed, so the agent accepts ssh, and a shortage after it is a new one.
