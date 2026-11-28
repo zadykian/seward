@@ -7,9 +7,9 @@ FILES =
 # the history when empty.
 LOG_OPTS =
 
-.PHONY: lint swiftlint compile shell vale rumdl actionlint zizmor gitleaks test
+.PHONY: lint swiftlint compile shell vale rumdl actionlint zizmor gitleaks checks test
 
-lint: swiftlint compile shell vale rumdl actionlint zizmor gitleaks
+lint: swiftlint compile shell vale rumdl actionlint zizmor gitleaks checks
 
 # SwiftLint (.tools/lint/swiftlint.yml) with --strict, which fails a warning too, on the package's
 # files alone: .build holds Swift files that nobody writes here. It loads sourcekitd from the Xcode
@@ -55,6 +55,11 @@ zizmor:
 gitleaks:
 	.tools/run gitleaks git --no-banner --redact --verbose \
 		$(if $(LOG_OPTS),--log-opts='$(LOG_OPTS)') .
+
+# The words check's own test, which is shell and needs git and jq. It runs whole, as it has no
+# FILES.
+checks:
+	sh .github/words-check-test.sh
 
 # The tests, which CI's tests job runs, with warnings as errors as the compiler gate has them.
 # They are no gate of lint.
