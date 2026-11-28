@@ -3,12 +3,13 @@
 seward keeps ssh keys in the Secure Enclave of a Mac. It makes them from a command line, and
 serves them to ssh and git as an ssh-agent, with no Touch ID and no password on each use.
 
-seward is one Swift program on Apple's CryptoKit. A key never leaves the Secure Enclave: its
-file holds a form that this Mac's Secure Enclave alone can use.
+seward is one Swift program on Apple's CryptoKit. A key of the `enclave` store, the default,
+never leaves the Secure Enclave: its file holds a form that this Mac's Secure Enclave alone can
+use. A key of the `file` store can: its file holds it whole, and a copy of the file signs anywhere.
 
 ## Status
 
-In development. The package builds, and `seward --version` runs. The commands below are
+In development. `seward keygen` and `seward --version` run. The other commands below are
 planned: [the issues](https://github.com/zadykian/seward/issues) hold the plan.
 
 ## Commands
@@ -19,6 +20,26 @@ planned: [the issues](https://github.com/zadykian/seward/issues) hold the plan.
 | `seward list` | lists the keys: name, type, fingerprint and store |
 | `seward remove NAME` | deletes a key |
 | `seward agent` | serves the keys to ssh on `~/.ssh/seward.sock` |
+
+## Keys
+
+A key's name is up to 251 letters, digits, `.`, `_` and `-`, so that `NAME.pub` fits in a file's
+name. It starts with a letter or a digit, and ends in none of `.pub`, `.sock` and `.lock`.
+`keygen` writes the key as `~/.ssh/NAME`, 0600, and its public half as `~/.ssh/NAME.pub`, 0644.
+It makes a missing `~/.ssh`, 0700, and prints the `.pub`'s line.
+
+`seward keygen --store enclave|file NAME` picks where the key lives:
+
+- `enclave`, the default: the Secure Enclave makes the key, which works from the first unlock
+  after the Mac starts, on this Mac alone. keygen exits 1 on a Mac with no Secure Enclave.
+- `file`: a software key, which its file holds whole, for a Mac or a virtual machine with no
+  Secure Enclave.
+
+The key's file is a line `seward-key VERSION STORE`, then the key in base64. A release reads
+every earlier version, and refuses a newer one by its number.
+
+Where the key exists alone, keygen writes its `.pub` from it. It changes nothing and exits 1
+where both exist, where `~/.ssh/NAME` is not seward's, or where the `.pub` exists alone.
 
 ## Build and test
 
