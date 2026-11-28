@@ -20,3 +20,17 @@ func permissions(of path: String) -> mode_t? {
 func names(in path: String) throws -> [String] {
     try FileManager.default.contentsOfDirectory(atPath: path).sorted()
 }
+
+/// The files of the directory at `path` by name, to show that a call changed none.
+func files(in path: String) throws -> [String: Data] {
+    var files: [String: Data] = [:]
+    for name in try names(in: path) {
+        files[name] = try Data(contentsOf: URL(fileURLWithPath: path + "/" + name))
+    }
+    return files
+}
+
+/// Writes `text` as a new file at `path`.
+func write(_ text: String, to path: String) throws {
+    try Data(text.utf8).write(to: URL(fileURLWithPath: path))
+}
