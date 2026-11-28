@@ -23,6 +23,8 @@ enum AgentCommand {
     /// Accepts each connection and serves it on a thread of its own, so that a client that holds
     /// one open keeps no other waiting.
     private static func serve(_ socket: AgentSocket, keys: KeyDirectory, log: SystemLog) throws -> Never {
+        // The shortage that the agent waits out, which the log names once as it begins.
+        var shortage: Int32?
         while true {
             let connection = accept(socket.descriptor, nil, nil)
             guard connection >= 0 else {
@@ -33,13 +35,15 @@ enum AgentCommand {
                 // Out of descriptors or memory for now: a moment later, a closed connection may
                 // have given some back.
                 case EMFILE, ENFILE, ENOBUFS, ENOMEM:
-                    log.record(.failed("\(error)"))
+                    if shortage != error.code { log.record(.failed("\(error)")) }
+                    shortage = error.code
                     usleep(100_000)
                     continue
                 default:
                     throw error
                 }
             }
+            shortage = nil
             let path = socket.path
             Thread.detachNewThread {
                 answer(connection, keys: keys, path: path)
