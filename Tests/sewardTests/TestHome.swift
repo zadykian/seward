@@ -110,3 +110,37 @@ func connects(to path: String) -> Bool {
     defer { close(client) }
     return address.withPointer { connect(client, $0, $1) } == 0
 }
+
+/// A connection to the agent's socket that a test speaks the protocol on, as ssh does. It closes
+/// as the test lets it go, and a read waits 10 seconds at most, so that a silent agent fails it.
+final class AgentClient {
+    private let descriptor: Int32
+
+    init(_ path: String) throws {
+        guard let address = SocketAddress(path) else { throw TestFailure(description: "no socket's address: \(path)") }
+        let client = socket(AF_UNIX, SOCK_STREAM, 0)
+        var noSignal: Int32 = 1
+        setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
+        var wait = timeval(tv_sec: 10, tv_usec: 0)
+        setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &wait, socklen_t(MemoryLayout<timeval>.size))
+        guard address.withPointer({ connect(client, $0, $1) }) == 0 else {
+            let reason = String(cString: strerror(errno))
+            close(client)
+            throw TestFailure(description: "\(path) did not connect: \(reason)")
+        }
+        descriptor = client
+    }
+
+    deinit { close(descriptor) }
+
+    func send(_ data: Data) throws {
+        try AgentCommand.send(data, to: descriptor, path: "the test's client")
+    }
+
+    /// The agent's next message, or nil where the agent closed the connection.
+    func receive() throws -> Data? {
+        try AgentWire.nextMessage { count in
+            try AgentCommand.receive(upTo: count, from: descriptor, path: "the test's client")
+        }
+    }
+}

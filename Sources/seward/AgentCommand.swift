@@ -13,7 +13,7 @@ enum AgentCommand {
         signal(SIGPIPE, SIG_IGN)
         let log = SystemLog()
         do {
-            try serve(AgentSocket(in: context.keys), keys: context.keys, log: log)
+            try serve(AgentSocket(in: context.keys), keys: context.keys, enclave: context.enclave, log: log)
         } catch {
             log.record(.failed("\(error)"))
             return Outcome(status: .failure)
@@ -22,7 +22,11 @@ enum AgentCommand {
 
     /// Accepts each connection and serves it on a thread of its own, so that a client that holds
     /// one open keeps no other waiting.
-    private static func serve(_ socket: AgentSocket, keys: KeyDirectory, log: SystemLog) throws -> Never {
+    private static func serve(
+        _ socket: AgentSocket, keys: KeyDirectory, enclave: any Enclave, log: SystemLog
+    ) throws -> Never {
+        // The shortage that the agent waits out, which the log names once as it begins.
+        var shortage: Int32?
         while true {
             let connection = accept(socket.descriptor, nil, nil)
             guard connection >= 0 else {
@@ -33,31 +37,34 @@ enum AgentCommand {
                 // Out of descriptors or memory for now: a moment later, a closed connection may
                 // have given some back.
                 case EMFILE, ENFILE, ENOBUFS, ENOMEM:
-                    log.record(.failed("\(error)"))
+                    if shortage != error.code { log.record(.failed("\(error)")) }
+                    shortage = error.code
                     usleep(100_000)
                     continue
                 default:
                     throw error
                 }
             }
+            shortage = nil
             let path = socket.path
             Thread.detachNewThread {
-                answer(connection, keys: keys, path: path)
+                answer(connection, keys: keys, enclave: enclave, path: path)
             }
         }
     }
 
     /// Serves one connection, with an agent of its own, as an Agent is not Sendable, then closes it.
-    private static func answer(_ connection: Int32, keys: KeyDirectory, path: String) {
+    /// Its keys load through the context's enclave, which a test gives.
+    static func answer(_ connection: Int32, keys: KeyDirectory, enclave: any Enclave, path: String) {
         defer { close(connection) }
-        let agent = Agent(context: Context(keys: keys, enclave: SecureEnclaveChip()), log: SystemLog())
+        let agent = Agent(context: Context(keys: keys, enclave: enclave), log: SystemLog())
         agent.serve(
             input: { count in try receive(upTo: count, from: connection, path: path) },
             output: { data in try send(data, to: connection, path: path) })
     }
 
     /// Up to `count` bytes of the connection, as one read gives them, and none at its end.
-    private static func receive(upTo count: Int, from connection: Int32, path: String) throws -> Data {
+    static func receive(upTo count: Int, from connection: Int32, path: String) throws -> Data {
         var buffer = [UInt8](repeating: 0, count: min(count, 65_536))
         while true {
             let received = read(connection, &buffer, buffer.count)
@@ -68,7 +75,7 @@ enum AgentCommand {
     }
 
     /// Writes all of `data` to the connection. A client that closed it fails the write with EPIPE.
-    private static func send(_ data: Data, to connection: Int32, path: String) throws {
+    static func send(_ data: Data, to connection: Int32, path: String) throws {
         var rest = data[...]
         while !rest.isEmpty {
             let sent = rest.withUnsafeBytes { write(connection, $0.baseAddress, $0.count) }

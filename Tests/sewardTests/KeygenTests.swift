@@ -167,6 +167,21 @@ import Testing
         }
     }
 
+    @Test func aKeygenRemovesWhatOneCutShortLeftAndARefusedOneDoesNot() throws {
+        try withTemporaryDirectory { root throws in
+            let keys = root + "/.ssh"
+            let leftover = keys + "/" + KeyDirectory.temporaryPrefix + UUID().uuidString
+            #expect(mkdir(keys, 0o700) == 0)
+            try write("seward-key 1 file\nAAAA\n", to: leftover)
+            try write("not seward's\n", to: keys + "/home")
+            #expect(backdate(leftover, by: 120))
+            #expect(keygen(["home"], in: root).status == .failure)
+            #expect(KeyDirectory.exists(leftover))
+            #expect(keygen(["--store", "file", "work"], in: root).status == .success)
+            #expect(try names(in: keys) == ["home", "work", "work.pub"])
+        }
+    }
+
     @Test func aDirectoryOfTheNameIsNotSewards() throws {
         try withTemporaryDirectory { root throws in
             let keys = root + "/.ssh"

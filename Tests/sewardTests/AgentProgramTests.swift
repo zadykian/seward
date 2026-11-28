@@ -16,14 +16,28 @@ import Testing
         }
     }
 
+    @Test func aKeyThatDoesNotLoadIsSkippedAndStandardErrorSaysSo() throws {
+        try withAgent { home, agent in
+            let broken = home.path + "/.ssh/broken"
+            let damaged = KeyFile(store: .file, key: Data(repeating: 7, count: 10))
+            try damaged.encoded().write(to: URL(fileURLWithPath: broken))
+            let listed = try home.run("/usr/bin/ssh-add", ["-L"], environment: ["SSH_AUTH_SOCK": home.socket])
+            let publicKey = try String(contentsOfFile: home.path + "/.ssh/work.pub", encoding: .utf8)
+            #expect(listed.status == 0, "\(listed.errors)")
+            #expect(listed.output == publicKey)
+            #expect(agent.errors.hasPrefix("seward: skipped \(broken): its key does not load on this Mac: "))
+        }
+    }
+
     @Test func sshKeygenSignsThroughTheAgentAndItsSignatureVerifies() throws {
-        try withAgent { home, _ in
+        try withAgent { home, agent in
             let data = home.path + "/data"
             try write("signed through seward\n", to: data)
             let signed = try home.run(
                 "/usr/bin/ssh-keygen", ["-Y", "sign", "-n", "file", "-f", home.path + "/.ssh/work.pub", data],
                 environment: ["SSH_AUTH_SOCK": home.socket])
             #expect(signed.status == 0, "\(signed.errors)")
+            #expect(agent.errors == "seward: signed with the key work\n")
             let publicKey = try String(contentsOfFile: home.path + "/.ssh/work.pub", encoding: .utf8)
             try write("seward-test " + publicKey, to: home.path + "/allowed_signers")
             let verify = ["-Y", "verify", "-f", home.path + "/allowed_signers", "-I", "seward-test", "-n", "file"]
@@ -73,6 +87,48 @@ import Testing
             #expect(agent.process.isRunning)
             let listed = try home.run("/usr/bin/ssh-add", ["-L"], environment: ["SSH_AUTH_SOCK": home.socket])
             #expect(listed.status == 0, "\(listed.errors)")
+        }
+    }
+
+    @Test func aConnectionThatBreaksTheFrameClosesAloneWhileAnotherIsServed() throws {
+        try withAgent { home, agent in
+            let request = AgentWire.framed(Data([AgentWire.requestIdentities]))
+            let broken = try AgentClient(home.socket)
+            let served = try AgentClient(home.socket)
+            // Half a length holds the first connection's thread waiting while the second is served.
+            try broken.send(Data([0xff, 0xff]))
+            try served.send(request)
+            #expect(try served.receive()?.first == AgentWire.identitiesAnswer)
+            // The length's other half puts it over the bound, and the agent closes that connection.
+            try broken.send(Data([0xff, 0xff]))
+            #expect(try broken.receive() == nil)
+            let closed = "seward: a connection closed: \(AgentWireError.tooLong(UInt32.max))\n"
+            #expect(eventually(within: 10) { agent.errors.contains(closed) })
+            try served.send(request)
+            #expect(try served.receive()?.first == AgentWire.identitiesAnswer)
+        }
+    }
+
+    @Test func anAgentOutOfDescriptorsLogsItOnceAndServesWhenTheyComeBack() throws {
+        try withAgent(descriptors: 20) { home, agent in
+            let line = "seward: \(home.socket): \(String(cString: strerror(EMFILE)))\n"
+            func logged() -> Int { agent.errors.components(separatedBy: line).count - 1 }
+            for _ in 1...2 {
+                let before = logged()
+                do {
+                    // More clients than the agent has descriptors for, held open, so that its
+                    // accept fails until they close.
+                    let clients = try (0..<32).map { _ in try AgentClient(home.socket) }
+                    try #require(eventually(within: 10) { logged() > before }, "\(agent.errors)")
+                    // The agent retries each tenth of a second, so a second's wait would log ten.
+                    Thread.sleep(forTimeInterval: 1)
+                    #expect(logged() == before + 1)
+                    withExtendedLifetime(clients) {}
+                }
+                // The clients closed, so the agent accepts ssh, and a shortage after it is a new one.
+                let listed = try home.run("/usr/bin/ssh-add", ["-L"], environment: ["SSH_AUTH_SOCK": home.socket])
+                #expect(listed.status == 0, "\(listed.errors)")
+            }
         }
     }
 
@@ -136,13 +192,19 @@ import Testing
     }
 
     /// Runs `body` with a home that holds the key `work` and an agent that serves it, which it
-    /// stops after.
-    private func withAgent(_ body: (TestHome, Started) throws -> Void) throws {
+    /// stops after. `descriptors` bounds the agent's open files, by a shell's ulimit that exec keeps.
+    private func withAgent(descriptors: Int? = nil, _ body: (TestHome, Started) throws -> Void) throws {
         try withShortDirectory { path in
             let home = TestHome(path: path)
             let keygen = try home.run(TestHome.seward, ["keygen", "--store", "file", "work"])
             try #require(keygen.status == 0, "\(keygen.errors)")
-            let agent = try home.start(TestHome.seward, ["agent"])
+            let agent: Started
+            if let descriptors {
+                let script = "ulimit -n \(descriptors) && exec \"$0\" agent"
+                agent = try home.start("/bin/sh", ["-c", script, TestHome.seward])
+            } else {
+                agent = try home.start(TestHome.seward, ["agent"])
+            }
             defer { agent.stop() }
             let socket = home.socket
             try #require(

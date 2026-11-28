@@ -44,24 +44,15 @@ enum AgentKeyFiles {
     /// a link, a directory or a pipe. It reads through one descriptor, which follows no link and
     /// waits on no pipe, so that a file swapped after the check never blocks the agent.
     private static func contentsIfSeward(_ path: String) throws -> Data? {
-        var info = stat()
-        guard lstat(path, &info) == 0 else {
-            if errno == ENOENT { return nil }
-            throw AgentKeyFileError.unopened(errno)
+        let contents: Data?
+        do {
+            contents = try KeyDirectory.sewardFileContents(path, upTo: maximumSize + 1)
+        } catch let error as SystemError {
+            // Gone, or a link now, since the directory was listed.
+            if error.code == ENOENT || error.code == ELOOP { return nil }
+            throw AgentKeyFileError.unopened(error.code)
         }
-        guard info.st_mode & S_IFMT == S_IFREG else { return nil }
-        let descriptor = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
-        guard descriptor >= 0 else {
-            // Gone, or a link now, since the check.
-            if errno == ENOENT || errno == ELOOP { return nil }
-            throw AgentKeyFileError.unopened(errno)
-        }
-        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: false)
-        defer { try? handle.close() }
-        guard fstat(descriptor, &info) == 0 else { throw AgentKeyFileError.unopened(errno) }
-        guard info.st_mode & S_IFMT == S_IFREG else { return nil }
-        let contents = try handle.read(upToCount: maximumSize + 1) ?? Data()
-        guard KeyFile.isSeward(contents) else { return nil }
+        guard let contents else { return nil }
         guard contents.count <= maximumSize else { throw AgentKeyFileError.tooLarge }
         return contents
     }
@@ -74,7 +65,7 @@ enum AgentKeyFileError: Error, Equatable, CustomStringConvertible {
 
     var description: String {
         switch self {
-        case .unopened(let code): "it does not open: \(String(cString: strerror(code)))"
+        case .unopened(let code): "it does not read: \(String(cString: strerror(code)))"
         case .tooLarge: "it is over the \(AgentKeyFiles.maximumSize) bytes that the agent reads of a key's file"
         }
     }

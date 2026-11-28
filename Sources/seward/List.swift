@@ -14,8 +14,7 @@ enum List {
             for name in try context.keys.keyNames() {
                 let path = context.keys.keyPath(name)
                 do {
-                    guard let contents = try KeyDirectory.regularFileContents(path), KeyFile.isSeward(contents)
-                    else { continue }
+                    guard let contents = try KeyDirectory.sewardFileContents(path) else { continue }
                     outcome.output += try row(name, contents, enclave: context.enclave)
                 } catch let error as SystemError where error.code == ENOENT {
                     continue  // The file vanished since the directory was read.
