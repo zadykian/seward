@@ -12,6 +12,7 @@ enum Cli {
         usage: seward keygen [--store enclave|file] NAME
                seward list
                seward remove [--yes] NAME
+               seward agent
                seward --version
 
         """
@@ -29,6 +30,9 @@ enum Cli {
         }
         if arguments.first == "remove" {
             return Remove.run(Array(arguments.dropFirst()), context: context)
+        }
+        if arguments.first == "agent" {
+            return AgentCommand.run(Array(arguments.dropFirst()), context: context)
         }
         return Outcome(status: .usage, errors: usage)
     }
