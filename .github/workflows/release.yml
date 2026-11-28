@@ -89,3 +89,94 @@ jobs:
           name: seward
           path: ${{ runner.temp }}/bin/seward
           if-no-files-found: error
+
+  # The release, once ci.yml and the build passed. The binary, the archive's name and the notes are
+  # checked for the local list's words, as the hooks check a commit. The list is the secret
+  # FORBIDDEN_WORDS, which must not be empty. The attestation is the only one of the repository's.
+  publish:
+    needs: [ci, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    env:
+      TAG: ${{ github.ref_name }}
+      ASSET: seward-aarch64-apple-darwin.tar.gz
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: seward
+          path: ${{ runner.temp }}/bin
+      # seward alone, 0755, owned by root, which mise's github: backend unpacks.
+      - name: Pack
+        run: |
+          chmod 0755 "$RUNNER_TEMP/bin/seward"
+          mkdir "$RUNNER_TEMP/dist"
+          tar -czf "$RUNNER_TEMP/dist/$ASSET" --format=ustar --owner=0 --group=0 --numeric-owner \
+              -C "$RUNNER_TEMP/bin" seward
+          [ "$(tar -tzf "$RUNNER_TEMP/dist/$ASSET")" = seward ] || {
+              echo "$ASSET holds more than seward" >&2
+              exit 1
+          }
+          case $(tar -tvzf "$RUNNER_TEMP/dist/$ASSET") in
+          "-rwxr-xr-x "*) ;;
+          *)
+              echo "seward in $ASSET is not a file at 0755" >&2
+              exit 1
+              ;;
+          esac
+      - name: Notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X POST "repos/$GH_REPO/releases/generate-notes" -f tag_name="$TAG" \
+              --jq .body >"$RUNNER_TEMP/notes.md"
+      # The log names a text that holds a word, never the word.
+      - name: The local list's words
+        env:
+          FORBIDDEN_WORDS: ${{ secrets.FORBIDDEN_WORDS }}
+        run: |
+          [ -n "$FORBIDDEN_WORDS" ] || {
+              echo "the secret FORBIDDEN_WORDS is empty" >&2
+              exit 1
+          }
+          printf '%s\n' "$FORBIDDEN_WORDS" | sed -e 'y/_/ /' -e 's/^[[:space:]]*//' \
+              -e 's/[[:space:]]*$//' -e '/^$/d' -e '/^#/d' >"$RUNNER_TEMP/words"
+          [ -s "$RUNNER_TEMP/words" ] || {
+              echo "the secret FORBIDDEN_WORDS holds no word" >&2
+              exit 1
+          }
+          printf '%s\n' "$ASSET" >"$RUNNER_TEMP/name"
+          found=0
+          for f in "$RUNNER_TEMP/bin/seward" "$RUNNER_TEMP/name" "$RUNNER_TEMP/notes.md"; do
+              LC_ALL=C tr _ ' ' <"$f" >"$RUNNER_TEMP/plain"
+              rc=0
+              grep -aqiwF -f "$RUNNER_TEMP/words" "$RUNNER_TEMP/plain" || rc=$?
+              [ "$rc" -le 1 ] || exit 2
+              if [ "$rc" = 0 ]; then
+                  echo "$f holds a word of the list" >&2
+                  found=1
+              fi
+          done
+          [ "$found" = 0 ]
+      # Before the release, so that no file is published without it.
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/dist/${{ env.ASSET }}
+      # A release is immutable once published, as the setting must be on: a fault then costs the
+      # version. Where the setting is off, the job fails on a release that can still be deleted.
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" "$RUNNER_TEMP/dist/$ASSET" --title "$TAG" \
+              --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
+          immutable=$(gh api "repos/$GH_REPO/releases/tags/$TAG" --jq .immutable)
+          [ "$immutable" = true ] || {
+              echo "release $TAG is not immutable: turn on immutable releases" >&2
+              exit 1
+          }
