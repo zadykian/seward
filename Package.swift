@@ -6,5 +6,6 @@ let package = Package(
     platforms: [.macOS(.v26)],
     targets: [
         .executableTarget(name: "seward"),
+        .testTarget(name: "sewardTests", dependencies: ["seward"]),
     ]
 )
