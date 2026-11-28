@@ -6,7 +6,7 @@ import Testing
 @Suite struct RemoveTests {
     /// Runs `seward ARGUMENTS` on the keys' directory `ROOT/.ssh`, with the terminal `prompt`.
     private func seward(
-        _ arguments: [String], in root: String, prompt: ScriptedPrompt = ScriptedPrompt()
+        _ arguments: [String], in root: String, prompt: any Prompt = ScriptedPrompt()
     ) -> Outcome {
         let context = Context(
             keys: KeyDirectory(path: root + "/.ssh"), enclave: RecordingEnclave(), prompt: prompt)
@@ -72,5 +72,84 @@ import Testing
             #expect(try files(in: root + "/.ssh") == before)
             #expect(prompt.questions.isEmpty)
         }
+    }
+
+    @Test(arguments: ["work", "work.pub"])
+    func eitherHalfAloneIsDeleted(half: String) throws {
+        try withTemporaryDirectory { root throws in
+            makePairs(in: root)
+            let keys = root + "/.ssh"
+            let other = half == "work" ? "work.pub" : "work"
+            #expect(unlink(keys + "/" + other) == 0)
+            let outcome = seward(["remove", "--yes", "work"], in: root)
+            #expect(outcome == Outcome(status: .success, output: "removed \(keys)/\(half)\n"))
+            #expect(try names(in: keys) == ["home", "home.pub"])
+        }
+    }
+
+    @Test func aKeyWithNoFileIsAFailureThatAsksNothing() throws {
+        try withTemporaryDirectory { root throws in
+            makePairs(in: root)
+            let prompt = ScriptedPrompt(["absent"])
+            let outcome = seward(["remove", "absent"], in: root, prompt: prompt)
+            let name = try #require(KeyName("absent"))
+            #expect(outcome == Outcome(status: .failure, errors: "seward: \(RemoveError.missing(name))\n"))
+            #expect(prompt.questions.isEmpty)
+            #expect(try names(in: root + "/.ssh") == ["home", "home.pub", "work", "work.pub"])
+        }
+    }
+
+    @Test(arguments: ["file", "link", "directory"])
+    func aNameWhoseFileIsNotSewardsDeletesNothing(kind: String) throws {
+        try withTemporaryDirectory { root throws in
+            makePairs(in: root)
+            let keys = root + "/.ssh"
+            #expect(unlink(keys + "/work") == 0)
+            switch kind {
+            case "file": try write("-----BEGIN OPENSSH PRIVATE KEY-----\n", to: keys + "/work")
+            case "link": #expect(symlink(keys + "/home", keys + "/work") == 0)
+            default:
+                try FileManager.default.createDirectory(atPath: keys + "/work", withIntermediateDirectories: false)
+            }
+            let before = try names(in: keys)
+            let outcome = seward(["remove", "--yes", "work"], in: root)
+            let errors = "seward: \(RemoveError.notSeward(keys + "/work"))\n"
+            #expect(outcome == Outcome(status: .failure, errors: errors))
+            #expect(try names(in: keys) == before)
+            #expect(try names(in: keys).contains("work.pub"))
+            #expect(try names(in: keys).contains("home"))
+        }
+    }
+
+    @Test func aFileReplacedWhileThePersonTypesIsNotDeleted() throws {
+        try withTemporaryDirectory { root throws in
+            makePairs(in: root)
+            let keys = root + "/.ssh"
+            let prompt = ReplacingPrompt(answer: "work") {
+                _ = unlink(keys + "/work")
+                try? write("-----BEGIN OPENSSH PRIVATE KEY-----\n", to: keys + "/work")
+            }
+            let outcome = seward(["remove", "work"], in: root, prompt: prompt)
+            let errors = "seward: \(RemoveError.notSeward(keys + "/work"))\n"
+            #expect(outcome == Outcome(status: .failure, errors: errors))
+            #expect(try names(in: keys) == ["home", "home.pub", "work", "work.pub"])
+        }
+    }
+}
+
+/// A terminal that runs `beforeAnswer` and then gives `answer`, as a person does after a pause.
+private final class ReplacingPrompt: Prompt {
+    let isInteractive = true
+    private let answer: String
+    private let beforeAnswer: () -> Void
+
+    init(answer: String, beforeAnswer: @escaping () -> Void) {
+        self.answer = answer
+        self.beforeAnswer = beforeAnswer
+    }
+
+    func ask(_ question: String) -> String? {
+        beforeAnswer()
+        return answer
     }
 }
