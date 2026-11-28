@@ -9,7 +9,8 @@ ssh and git as an ssh-agent. The program is Swift on Apple's CryptoKit, for macO
   the Secure Enclave and the terminal. It returns an outcome, so that a test calls it with no
   process and gives its own context. `main.swift` writes the outcome and exits.
 - `Tests/sewardTests`: the package's tests, in Swift Testing.
-- `Package.swift`: no dependency. Foundation, CryptoKit, Security, os and Darwin alone.
+- `Package.swift`: no dependency. Foundation, CryptoKit, Security, os and Darwin alone, and OSLog
+  in the tests.
 - `Makefile`: the gates and the tests. `.tools/` holds the gates' tools: `run` pins their
   binaries, `files` lists a gate's files, and `lint/` holds the linters' configs.
 - `.githooks/`: the hooks that check each commit for the words of the local list and for secrets.
