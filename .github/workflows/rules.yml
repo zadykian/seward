@@ -1,0 +1,28 @@
+name: rules
+
+# The toolkit's checks of a pull request: its commits, size and title, its description and the
+# banned terms. Each warns by a comment and passes, so no ruleset requires it.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+# Two runs of a pull request race to create each check's comment: the newer event's run wins.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  rules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      checks: read
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: zadykian/toolkit/actions/atomic-commits@04832afcdb304570598f17d3618366c0f4d2785f # v7.3.0
+      - uses: zadykian/toolkit/actions/pr-description@04832afcdb304570598f17d3618366c0f4d2785f # v7.3.0
+      - uses: zadykian/toolkit/actions/banned-terms@04832afcdb304570598f17d3618366c0f4d2785f # v7.3.0
