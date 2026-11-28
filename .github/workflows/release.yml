@@ -1,0 +1,91 @@
+name: release
+
+# A pushed tag vX.Y.Z on a commit of main builds seward for Apple silicon, and publishes it once
+# ci.yml has passed on the tag. release.md, beside it, says how a release is cut and what is set
+# by hand.
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+jobs:
+  # The tag must be vX.Y.Z, on a commit that main holds, as only a landed change is released.
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      # The whole history, so that origin/main is there to hold the tag's commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: The tag and main
+        run: |
+          printf '%s\n' "$TAG" | grep -Eq '^v(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*)){2}$' || {
+              echo "the tag is not vX.Y.Z" >&2
+              exit 1
+          }
+          git merge-base --is-ancestor HEAD origin/main || {
+              echo "origin/main does not hold the tag's commit" >&2
+              exit 1
+          }
+
+  # ci.yml's lint and tests, on the tag's commit.
+  ci:
+    needs: check
+    uses: ./.github/workflows/ci.yml # zizmor: ignore[self-repository] actionlint rejects $/
+    permissions:
+      contents: read
+
+  # The binary, which the linker signs ad hoc. The tag's version goes into Version.swift first.
+  build:
+    needs: check
+    runs-on: macos-26
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ github.ref_name }}
+      # ci.yml's runner and Xcode: a bump changes both files.
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The tag's version
+        run: |
+          file=Sources/seward/Version.swift
+          sed -i '' "s/static let current = \"dev\"/static let current = \"${TAG#v}\"/" "$file"
+          grep -qF "static let current = \"${TAG#v}\"" "$file" || {
+              echo "$file holds no version \"dev\" to replace" >&2
+              exit 1
+          }
+      - name: Build
+        run: |
+          swift build -c release
+          mkdir "$RUNNER_TEMP/bin"
+          cp "$(swift build -c release --show-bin-path)/seward" "$RUNNER_TEMP/bin/seward"
+      - name: seward is arm64 and prints the version
+        run: |
+          bin=$RUNNER_TEMP/bin/seward
+          archs=$(lipo -archs "$bin")
+          [ "$archs" = arm64 ] || {
+              echo "seward is built for $archs, not arm64 alone" >&2
+              exit 1
+          }
+          got=$("$bin" --version)
+          [ "$got" = "seward ${TAG#v}" ] || {
+              echo "seward --version printed $got, not seward ${TAG#v}" >&2
+              exit 1
+          }
+      # The bare file, as upload-artifact drops its mode: the job that publishes it packs it.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: seward
+          path: ${{ runner.temp }}/bin/seward
+          if-no-files-found: error
