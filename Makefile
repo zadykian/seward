@@ -41,20 +41,15 @@ rumdl:
 	@set -ef; files=$$(.tools/files md $(FILES)); [ -z "$$files" ] || \
 		.tools/run rumdl check --config .tools/lint/rumdl.toml $$files
 
-# The workflows' shell scripts go through the pinned ShellCheck. Both this gate and zizmor's
-# refuse a tree with no workflow, and CI's pull request adds the first, so they skip until then.
+# The workflows' shell scripts go through the pinned ShellCheck.
 actionlint:
-	@if [ -d .github/workflows ]; then \
-		shellcheck="$$(.tools/run -path shellcheck)" && \
-		.tools/run actionlint -shellcheck="$$shellcheck" -pyflakes=; \
-	else echo 'actionlint: no workflow yet'; fi
+	shellcheck="$$(.tools/run -path shellcheck)" && \
+		.tools/run actionlint -shellcheck="$$shellcheck" -pyflakes=
 
 # The workflows, with the online audits where GH_TOKEN is set, as in CI. Without it, --offline says
 # so, as zizmor warns of the offline mode that it chose alone.
 zizmor:
-	@if [ -d .github/workflows ]; then \
-		.tools/run zizmor $(if $(GH_TOKEN),,--offline) .; \
-	else echo 'zizmor: no workflow yet'; fi
+	.tools/run zizmor $(if $(GH_TOKEN),,--offline) .
 
 # The commits of LOG_OPTS. --redact keeps a secret it finds out of the log, which is public.
 gitleaks:
