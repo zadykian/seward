@@ -41,6 +41,11 @@ every earlier version, and refuses a newer one by its number.
 Where the key exists alone, keygen writes its `.pub` from it. It changes nothing and exits 1
 where both exist, where `~/.ssh/NAME` is not seward's, or where the `.pub` exists alone.
 
+keygen writes each file as `~/.ssh/.seward-UUID` first, then links it in place. A run cut short
+can leave one, which may hold the key. The next keygen that writes a file removes one over a
+minute old, as a write in progress is younger. It leaves a link, a directory and a file of another
+user, which seward did not write.
+
 ## Listing and removing keys
 
 `seward list` prints a line for each key file of seward's in `~/.ssh`, known by the first line of

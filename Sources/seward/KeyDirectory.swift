@@ -65,10 +65,29 @@ struct KeyDirectory {
         }
     }
 
+    /// The start of a file's name that `writeNew` writes before it links it: no key's name starts so.
+    static let temporaryPrefix = ".seward-"
+
+    /// Removes the files that a write cut short left: `.seward-UUID`, a regular file of this user's,
+    /// past `age` seconds old, as a write in progress is younger. One that does not go stays.
+    func removeLeftovers(olderThan age: TimeInterval = 60) {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: path) else { return }
+        for name in names where name.hasPrefix(Self.temporaryPrefix) {
+            guard UUID(uuidString: String(name.dropFirst(Self.temporaryPrefix.count))) != nil,
+                let attributes = try? FileManager.default.attributesOfItem(atPath: "\(path)/\(name)"),
+                attributes[.type] as? FileAttributeType == .typeRegular,
+                (attributes[.ownerAccountID] as? NSNumber)?.uint32Value == geteuid(),
+                let modified = attributes[.modificationDate] as? Date,
+                -modified.timeIntervalSinceNow > age
+            else { continue }
+            unlink("\(path)/\(name)")
+        }
+    }
+
     /// Writes a new file at `target`, whole or not at all, and never over a file there. It writes
     /// a file of a name that no key takes, then links it as `target`, which fails where one exists.
     func writeNew(_ contents: Data, to target: String, mode: mode_t) throws {
-        let temporary = "\(path)/.seward-\(UUID().uuidString)"
+        let temporary = "\(path)/\(Self.temporaryPrefix)\(UUID().uuidString)"
         let descriptor = open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard descriptor >= 0 else { throw SystemError(path: temporary, code: errno) }
         defer { unlink(temporary) }

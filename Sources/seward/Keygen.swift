@@ -69,8 +69,9 @@ enum Keygen {
     }
 
     /// Writes the `.pub` last, so that a run cut short leaves the key alone, which a second run
-    /// mends.
+    /// mends. It removes what an earlier run cut short left mid-write, as no other tool would.
     private static func writePublicKey(of key: SigningKey, name: KeyName, keys: KeyDirectory) throws -> String {
+        keys.removeLeftovers()
         let line = SSHPublicKey(key.publicKey).line(comment: name.value)
         try keys.writeNew(Data(line.utf8), to: keys.publicKeyPath(name), mode: 0o644)
         return line

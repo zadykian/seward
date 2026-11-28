@@ -45,6 +45,20 @@ import Testing
         }
     }
 
+    @Test func aWritesStaleLeftoverGoesAndNothingElseDoes() throws {
+        try withTemporaryDirectory { root throws in
+            let leftovers = (0..<4).map { _ in KeyDirectory.temporaryPrefix + UUID().uuidString }
+            let (stale, fresh, folder, link) = (leftovers[0], leftovers[1], leftovers[2], leftovers[3])
+            for name in [stale, fresh, ".seward-notes", "work"] { try write("contents\n", to: root + "/" + name) }
+            #expect(mkdir(root + "/" + folder, 0o700) == 0 && symlink(root + "/work", root + "/" + link) == 0)
+            for name in [stale, folder, link, ".seward-notes", "work"] {
+                #expect(backdate(root + "/" + name, by: 120))
+            }
+            KeyDirectory(path: root).removeLeftovers()
+            #expect(try names(in: root) == [fresh, folder, link, ".seward-notes", "work"].sorted())
+        }
+    }
+
     @Test func aLinkThatLeadsNowhereExistsAndStays() throws {
         try withTemporaryDirectory { root throws in
             #expect(symlink(root + "/nowhere", root + "/work") == 0)

@@ -43,3 +43,9 @@ func files(in path: String) throws -> [String: Data] {
 func write(_ text: String, to path: String) throws {
     try Data(text.utf8).write(to: URL(fileURLWithPath: path))
 }
+
+/// Sets the time that what is at `path` was last modified `seconds` back: a link's own, not its file's.
+func backdate(_ path: String, by seconds: Int) -> Bool {
+    let then = timeval(tv_sec: time(nil) - seconds, tv_usec: 0)
+    return lutimes(path, [then, then]) == 0
+}
