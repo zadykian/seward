@@ -54,6 +54,34 @@ final class ClientBytes {
         #expect(try AgentWire.nextMessage(client.read) == message)
     }
 
+    @Test func aRequestForTheKeysIsReadPastAnyContents() throws {
+        #expect(try AgentRequest(Data([11])) == .identities)
+        #expect(try AgentRequest(Data([11, 0, 0, 0, 9])) == .identities)
+    }
+
+    @Test func aSignRequestHoldsTheKeyTheDataAndTheFlags() throws {
+        let message = Data([13]) + AgentWire.string(Data([1, 2])) + AgentWire.string(Data([3])) + AgentWire.uint32(4)
+        #expect(try AgentRequest(message) == .sign(key: Data([1, 2]), data: Data([3]), flags: 4))
+    }
+
+    @Test(arguments: [
+        [],
+        [13],
+        [13, 0, 0],
+        [13, 0, 0, 0, 3, 1, 2],
+        [13, 255, 255, 255, 255, 1],
+        [13, 0, 0, 0, 1, 1, 0, 0, 0, 0],
+        [13, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0],
+    ] as [[UInt8]])
+    func aRequestWithAFieldPastItsEndIsCutShort(bytes: [UInt8]) {
+        #expect(throws: AgentWireError.cutShort) { try AgentRequest(Data(bytes)) }
+    }
+
+    @Test(arguments: [5, 9, 17, 18, 19, 22, 25, 27, 255] as [UInt8])
+    func anyOtherTypeIsAnotherRequest(type: UInt8) throws {
+        #expect(try AgentRequest(Data([type, 0, 0, 0, 1, 1])) == .other(type))
+    }
+
     @Test func aFramedMessageHasItsLengthBeforeIt() {
         #expect(AgentWire.framed(Data([5])) == Data([0, 0, 0, 1, 5]))
         #expect(AgentWire.string(Data(repeating: 7, count: 258)).prefix(4) == Data([0, 0, 1, 2]))

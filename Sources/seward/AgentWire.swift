@@ -67,3 +67,54 @@ enum AgentWireError: Error, Equatable, CustomStringConvertible {
         }
     }
 }
+
+/// A request of ssh's, read from a message.
+enum AgentRequest: Equatable {
+    case identities
+    /// The public key's blob that names the key, and the data to sign. The flags pick an RSA
+    /// signature's hash alone, so a P-256 key ignores them.
+    case sign(key: Data, data: Data, flags: UInt32)
+    /// Any other type, which the agent refuses.
+    case other(UInt8)
+
+    /// Reads a message, its type and contents. One with no type, or a field past its end, is
+    /// cut short.
+    init(_ message: Data) throws {
+        guard let type = message.first else { throw AgentWireError.cutShort }
+        var fields = Fields(message.dropFirst())
+        switch type {
+        case AgentWire.requestIdentities:
+            self = .identities
+        case AgentWire.signRequest:
+            let key = try fields.string()
+            let data = try fields.string()
+            self = .sign(key: key, data: data, flags: try fields.uint32())
+        default:
+            self = .other(type)
+        }
+    }
+
+    /// A message's contents, read field by field from the front.
+    private struct Fields {
+        private var rest: Data
+
+        init(_ contents: Data) {
+            rest = contents
+        }
+
+        mutating func uint32() throws -> UInt32 {
+            guard rest.count >= 4 else { throw AgentWireError.cutShort }
+            let value = rest.prefix(4).reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
+            rest = rest.dropFirst(4)
+            return value
+        }
+
+        mutating func string() throws -> Data {
+            let length = Int(try uint32())
+            guard rest.count >= length else { throw AgentWireError.cutShort }
+            let value = Data(rest.prefix(length))
+            rest = rest.dropFirst(length)
+            return value
+        }
+    }
+}
