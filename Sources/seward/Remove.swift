@@ -9,8 +9,10 @@ enum Remove {
         case .failure(let wrong):
             return Outcome(status: .usage, errors: "seward: \(wrong.reason)\n" + Cli.usage)
         case .success(let call):
-            guard call.confirmed else {
-                return Outcome(status: .usage, errors: "seward: remove takes --yes\n" + Cli.usage)
+            // With no terminal and no --yes nobody can answer: a script says so.
+            guard call.confirmed || context.prompt.isInteractive else {
+                let reason = "remove asks on a terminal: where there is none, add --yes"
+                return Outcome(status: .usage, errors: "seward: \(reason)\n" + Cli.usage)
             }
             do {
                 return Outcome(status: .success, output: try remove(call, context: context))
@@ -20,6 +22,12 @@ enum Remove {
         }
     }
 
+    /// Throws unless the regular file at `path` is a key file of seward's.
+    private static func requireSeward(_ path: String) throws {
+        guard let contents = try KeyDirectory.regularFileContents(path), KeyFile.isSeward(contents)
+        else { throw RemoveError.notSeward(path) }
+    }
+
     /// Deletes the files and returns a line for each. A file that is not seward's is never deleted.
     private static func remove(_ call: RemoveCall, context: Context) throws -> String {
         let keyPath = context.keys.keyPath(call.name)
@@ -27,12 +35,21 @@ enum Remove {
         let hasKey = KeyDirectory.exists(keyPath)
         let hasPublicKey = KeyDirectory.exists(publicKeyPath)
         guard hasKey || hasPublicKey else { throw RemoveError.missing(call.name) }
-        if hasKey {
-            guard let contents = try KeyDirectory.regularFileContents(keyPath), KeyFile.isSeward(contents)
-            else { throw RemoveError.notSeward(keyPath) }
-        }
+        if hasKey { try requireSeward(keyPath) }
         // The `.pub` goes first, so that a run cut short leaves the key alone, which keygen mends.
         let paths = (hasPublicKey ? [publicKeyPath] : []) + (hasKey ? [keyPath] : [])
+        if !call.confirmed {
+            let question = """
+                Delete \(paths.joined(separator: " and "))?
+                This removes this copy alone: any other copy of the key's file, a backup's included, \
+                still signs on this Mac. Revoke the key at GitHub and in authorized_keys too.
+                Type the name again to delete:\u{20}
+                """
+            let answer = context.prompt.ask(question)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard answer == call.name.value else { throw RemoveError.notConfirmed }
+            // The file may have been replaced while the person typed.
+            if hasKey { try requireSeward(keyPath) }
+        }
         var output = ""
         for path in paths {
             guard unlink(path) == 0 || errno == ENOENT else { throw SystemError(path: path, code: errno) }
