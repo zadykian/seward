@@ -1,0 +1,26 @@
+name: issues
+
+# The toolkit's check of an issue's title and form fields. It warns by a comment and passes. A
+# pull request's event names no issue, so the check has a workflow of its own.
+
+# edited checks the issue again once its title or body changes.
+on:
+  issues:
+    types: [opened, edited]
+
+# Two runs of an issue race to create the check's comment: the newer event's run wins.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  issue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # The check reads the issue through GitHub's API, so it checks out nothing.
+    permissions:
+      issues: write
+    steps:
+      - uses: zadykian/toolkit/actions/issue@04832afcdb304570598f17d3618366c0f4d2785f # v7.3.0

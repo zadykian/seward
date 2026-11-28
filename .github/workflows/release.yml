@@ -1,0 +1,182 @@
+name: release
+
+# A pushed tag vX.Y.Z on a commit of main builds seward for Apple silicon, and publishes it once
+# ci.yml has passed on the tag. release.md, beside it, says how a release is cut and what is set
+# by hand.
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+jobs:
+  # The tag must be vX.Y.Z, on a commit that main holds, as only a landed change is released.
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      # The whole history, so that origin/main is there to hold the tag's commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: The tag and main
+        run: |
+          printf '%s\n' "$TAG" | grep -Eq '^v(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*)){2}$' || {
+              echo "the tag is not vX.Y.Z" >&2
+              exit 1
+          }
+          git merge-base --is-ancestor HEAD origin/main || {
+              echo "origin/main does not hold the tag's commit" >&2
+              exit 1
+          }
+
+  # ci.yml's lint and tests, on the tag's commit.
+  ci:
+    needs: check
+    uses: ./.github/workflows/ci.yml # zizmor: ignore[self-repository] actionlint rejects $/
+    permissions:
+      contents: read
+
+  # The binary, which the linker signs ad hoc. The tag's version goes into Version.swift first.
+  build:
+    needs: check
+    runs-on: macos-26
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ github.ref_name }}
+      # ci.yml's runner and Xcode: a bump changes both files.
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The tag's version
+        run: |
+          file=Sources/seward/Version.swift
+          sed -i '' "s/static let current = \"dev\"/static let current = \"${TAG#v}\"/" "$file"
+          grep -qF "static let current = \"${TAG#v}\"" "$file" || {
+              echo "$file holds no version \"dev\" to replace" >&2
+              exit 1
+          }
+      - name: Build
+        run: |
+          swift build -c release
+          mkdir "$RUNNER_TEMP/bin"
+          cp "$(swift build -c release --show-bin-path)/seward" "$RUNNER_TEMP/bin/seward"
+      - name: seward is arm64 and prints the version
+        run: |
+          bin=$RUNNER_TEMP/bin/seward
+          archs=$(lipo -archs "$bin")
+          [ "$archs" = arm64 ] || {
+              echo "seward is built for $archs, not arm64 alone" >&2
+              exit 1
+          }
+          got=$("$bin" --version)
+          [ "$got" = "seward ${TAG#v}" ] || {
+              echo "seward --version printed $got, not seward ${TAG#v}" >&2
+              exit 1
+          }
+      # The bare file, as upload-artifact drops its mode: the job that publishes it packs it.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: seward
+          path: ${{ runner.temp }}/bin/seward
+          if-no-files-found: error
+
+  # The release, once ci.yml and the build passed. The binary, the archive's name and the notes are
+  # checked for the local list's words, as the hooks check a commit. The list is the secret
+  # FORBIDDEN_WORDS, which must not be empty. The attestation is the only one of the repository's.
+  publish:
+    needs: [ci, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    env:
+      TAG: ${{ github.ref_name }}
+      ASSET: seward-aarch64-apple-darwin.tar.gz
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: seward
+          path: ${{ runner.temp }}/bin
+      # seward alone, 0755, owned by root, which mise's github: backend unpacks.
+      - name: Pack
+        run: |
+          chmod 0755 "$RUNNER_TEMP/bin/seward"
+          mkdir "$RUNNER_TEMP/dist"
+          tar -czf "$RUNNER_TEMP/dist/$ASSET" --format=ustar --owner=0 --group=0 --numeric-owner \
+              -C "$RUNNER_TEMP/bin" seward
+          [ "$(tar -tzf "$RUNNER_TEMP/dist/$ASSET")" = seward ] || {
+              echo "$ASSET holds more than seward" >&2
+              exit 1
+          }
+          case $(tar -tvzf "$RUNNER_TEMP/dist/$ASSET") in
+          "-rwxr-xr-x "*) ;;
+          *)
+              echo "seward in $ASSET is not a file at 0755" >&2
+              exit 1
+              ;;
+          esac
+      - name: Notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X POST "repos/$GH_REPO/releases/generate-notes" -f tag_name="$TAG" \
+              --jq .body >"$RUNNER_TEMP/notes.md"
+      # The log names a text that holds a word, never the word.
+      - name: The local list's words
+        env:
+          FORBIDDEN_WORDS: ${{ secrets.FORBIDDEN_WORDS }}
+        run: |
+          [ -n "$FORBIDDEN_WORDS" ] || {
+              echo "the secret FORBIDDEN_WORDS is empty" >&2
+              exit 1
+          }
+          printf '%s\n' "$FORBIDDEN_WORDS" | sed -e 'y/_/ /' -e 's/^[[:space:]]*//' \
+              -e 's/[[:space:]]*$//' -e '/^$/d' -e '/^#/d' >"$RUNNER_TEMP/words"
+          [ -s "$RUNNER_TEMP/words" ] || {
+              echo "the secret FORBIDDEN_WORDS holds no word" >&2
+              exit 1
+          }
+          printf '%s\n' "$ASSET" >"$RUNNER_TEMP/name"
+          found=0
+          for f in "$RUNNER_TEMP/bin/seward" "$RUNNER_TEMP/name" "$RUNNER_TEMP/notes.md"; do
+              LC_ALL=C tr _ ' ' <"$f" >"$RUNNER_TEMP/plain"
+              rc=0
+              grep -aqiwF -f "$RUNNER_TEMP/words" "$RUNNER_TEMP/plain" || rc=$?
+              [ "$rc" -le 1 ] || exit 2
+              if [ "$rc" = 0 ]; then
+                  echo "$f holds a word of the list" >&2
+                  found=1
+              fi
+          done
+          [ "$found" = 0 ]
+      # Before the release, so that no file is published without it.
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/dist/${{ env.ASSET }}
+      # A release is immutable once published, as the setting must be on: a fault then costs the
+      # version. Where the setting is off, the job fails on a release that can still be deleted.
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" "$RUNNER_TEMP/dist/$ASSET" --title "$TAG" \
+              --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
+          immutable=$(gh api "repos/$GH_REPO/releases/tags/$TAG" --jq .immutable)
+          [ "$immutable" = true ] || {
+              echo "release $TAG is not immutable: turn on immutable releases" >&2
+              exit 1
+          }

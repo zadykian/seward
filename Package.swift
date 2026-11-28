@@ -1,0 +1,11 @@
+// swift-tools-version: 6.2
+import PackageDescription
+
+let package = Package(
+    name: "seward",
+    platforms: [.macOS(.v26)],
+    targets: [
+        .executableTarget(name: "seward"),
+        .testTarget(name: "sewardTests", dependencies: ["seward"]),
+    ]
+)

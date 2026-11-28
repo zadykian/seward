@@ -1,0 +1,18 @@
+# SwiftLint's rules, run by `make swiftlint` with --strict: a warning fails too.
+opt_in_rules:
+  - contains_over_first_not_nil
+  - empty_count
+  - empty_string
+  - fatal_error_message
+  - first_where
+  - force_unwrapping
+  - implicitly_unwrapped_optional
+  - last_where
+  - modifier_order
+  - redundant_nil_coalescing
+  - sorted_imports
+  - toggle_bool
+
+# A multi-line collection ends with a comma, as Swift's own formatter writes it.
+trailing_comma:
+  mandatory_comma: true
