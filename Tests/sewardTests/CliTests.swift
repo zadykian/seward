@@ -33,6 +33,11 @@ import Testing
         #expect(outcome == Outcome(status: .usage, errors: "seward: keygen takes one NAME\n" + Cli.usage))
     }
 
+    @Test func anAgentCallWithAnArgumentSaysWhyAboveTheUsage() {
+        let outcome = Cli.run(["agent", "extra"], context: context)
+        #expect(outcome == Outcome(status: .usage, errors: "seward: agent takes no argument\n" + Cli.usage))
+    }
+
     @Test func theStatusesAreZeroOneAndTwo() {
         #expect(ExitStatus.success.rawValue == 0)
         #expect(ExitStatus.failure.rawValue == 1)
