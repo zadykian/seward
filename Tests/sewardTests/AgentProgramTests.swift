@@ -76,6 +76,25 @@ import Testing
         }
     }
 
+    @Test func aConnectionThatBreaksTheFrameClosesAloneWhileAnotherIsServed() throws {
+        try withAgent { home, agent in
+            let request = AgentWire.framed(Data([AgentWire.requestIdentities]))
+            let broken = try AgentClient(home.socket)
+            let served = try AgentClient(home.socket)
+            // Half a length holds the first connection's thread waiting while the second is served.
+            try broken.send(Data([0xff, 0xff]))
+            try served.send(request)
+            #expect(try served.receive()?.first == AgentWire.identitiesAnswer)
+            // The length's other half puts it over the bound, and the agent closes that connection.
+            try broken.send(Data([0xff, 0xff]))
+            #expect(try broken.receive() == nil)
+            let closed = "seward: a connection closed: \(AgentWireError.tooLong(UInt32.max))\n"
+            #expect(eventually(within: 10) { agent.errors.contains(closed) })
+            try served.send(request)
+            #expect(try served.receive()?.first == AgentWire.identitiesAnswer)
+        }
+    }
+
     @Test func aSecondStartFindsTheLockAndExitsOne() throws {
         try withAgent { home, agent in
             let second = try home.run(TestHome.seward, ["agent"])

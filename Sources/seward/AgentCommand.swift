@@ -57,7 +57,7 @@ enum AgentCommand {
     }
 
     /// Up to `count` bytes of the connection, as one read gives them, and none at its end.
-    private static func receive(upTo count: Int, from connection: Int32, path: String) throws -> Data {
+    static func receive(upTo count: Int, from connection: Int32, path: String) throws -> Data {
         var buffer = [UInt8](repeating: 0, count: min(count, 65_536))
         while true {
             let received = read(connection, &buffer, buffer.count)
@@ -68,7 +68,7 @@ enum AgentCommand {
     }
 
     /// Writes all of `data` to the connection. A client that closed it fails the write with EPIPE.
-    private static func send(_ data: Data, to connection: Int32, path: String) throws {
+    static func send(_ data: Data, to connection: Int32, path: String) throws {
         var rest = data[...]
         while !rest.isEmpty {
             let sent = rest.withUnsafeBytes { write(connection, $0.baseAddress, $0.count) }
