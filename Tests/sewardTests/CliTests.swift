@@ -3,8 +3,11 @@ import Testing
 @testable import seward
 
 @Suite struct CliTests {
+    /// A context that no call here reaches: a keys' directory that is missing.
+    private let context = Context(keys: KeyDirectory(path: "/nonexistent/.ssh"), enclave: RecordingEnclave())
+
     @Test func versionPrintsTheVersionAndExitsZero() {
-        let outcome = Cli.run(["--version"])
+        let outcome = Cli.run(["--version"], context: context)
         #expect(outcome.status == .success)
         #expect(outcome.output == "seward \(Version.current)\n")
         #expect(outcome.errors.isEmpty)
@@ -16,12 +19,18 @@ import Testing
         ["list"],
         ["--version", "extra"],
         ["extra", "--version"],
+        ["extra", "keygen", "work"],
     ] as [[String]])
     func anyOtherCallExitsTwoWithTheUsage(arguments: [String]) {
-        let outcome = Cli.run(arguments)
+        let outcome = Cli.run(arguments, context: context)
         #expect(outcome.status == .usage)
         #expect(outcome.output.isEmpty)
         #expect(outcome.errors == Cli.usage)
+    }
+
+    @Test func aWrongCallOfKeygenSaysWhyAboveTheUsage() {
+        let outcome = Cli.run(["keygen"], context: context)
+        #expect(outcome == Outcome(status: .usage, errors: "seward: keygen takes one NAME\n" + Cli.usage))
     }
 
     @Test func theStatusesAreZeroOneAndTwo() {

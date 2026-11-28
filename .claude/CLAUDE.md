@@ -5,8 +5,9 @@ ssh and git as an ssh-agent. The program is Swift on Apple's CryptoKit, for macO
 
 ## Layout
 
-- `Sources/seward`: the program. `Cli` takes the arguments and returns an outcome, so that a test
-  calls it with no process. `main.swift` writes the outcome and exits.
+- `Sources/seward`: the program. `Cli` takes the arguments and a `Context`, the keys' directory
+  and the Secure Enclave, and returns an outcome, so that a test calls it with no process and
+  gives its own context. `main.swift` writes the outcome and exits.
 - `Tests/sewardTests`: the package's tests, in Swift Testing.
 - `Package.swift`: no dependency. Foundation, CryptoKit, Security, os and Darwin alone.
 - `Makefile`: the gates and the tests. `.tools/` holds the gates' tools: `run` pins their
