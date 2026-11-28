@@ -1,0 +1,62 @@
+name: ci
+
+# Every pull request, whatever its base, since pull requests are stacked, each on the one below it.
+# On main, each pull request's merge. release.yml calls it on a tag, where the event is the push.
+# No ready_for_review: a run that skips both jobs would pass the ruleset's checks on a head that
+# failed them.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+# A newer push to a pull request cancels its runs still in progress, as their head is gone. A push
+# to main and a release's call each take a group of their own run, so nothing cancels them. The name
+# is written out, as in a call github.workflow names the caller.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: {}
+
+# The runner and the Xcode are pinned: a new macOS or Xcode would change the findings and the
+# binary with no commit. DEVELOPER_DIR names the Xcode of the compiler and of the sourcekitd that
+# SwiftLint loads. A bump changes it here and in release.yml.
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app
+
+jobs:
+  # make lint, the one gate, with the tools that .tools/run pins. Any finding fails it, warnings
+  # included.
+  lint:
+    runs-on: macos-26
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      # A pull request's own head, rather than GitHub's test merge of it, as its commits land as
+      # they are. The whole history, as gitleaks scans every commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: make lint
+        run: make lint
+        env:
+          # zizmor's online audits, which look the actions up on GitHub, need a token.
+          GH_TOKEN: ${{ github.token }}
+
+  # make test, the package's tests, a check of its own, as it is no gate of make lint.
+  tests:
+    runs-on: macos-26
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: make test
+        run: make test
