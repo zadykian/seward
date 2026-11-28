@@ -32,6 +32,109 @@ import Testing
         }
     }
 
+    @Test func anSshdOfTheTestsOwnTakesALoginThroughTheAgent() throws {
+        try withAgent { home, _ in
+            let port = try freePort()
+            let sshd = try startSshd(in: home, port: port)
+            defer { sshd.stop() }
+            let login = try home.run(
+                "/usr/bin/ssh",
+                [
+                    "-F", "/dev/null", "-p", "\(port)", "-l", NSUserName(),
+                    "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=\(home.socket)",
+                    "-o", "IdentityFile=\(home.path)/.ssh/work.pub",
+                    "-o", "UserKnownHostsFile=\(home.path)/known_hosts", "-o", "GlobalKnownHostsFile=/dev/null",
+                    "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+                    "127.0.0.1", "echo", "logged-in",
+                ])
+            #expect(login.status == 0, "\(login.errors)\nsshd: \(sshd.errors)")
+            #expect(login.output == "logged-in\n")
+        }
+    }
+
+    @Test func aClientThatClosesBeforeItsAnswerLeavesTheAgentServing() throws {
+        try withAgent { home, agent in
+            let address = try #require(SocketAddress(home.socket))
+            let client = socket(AF_UNIX, SOCK_STREAM, 0)
+            // Were the agent gone, a write would fail rather than end the tests.
+            var noSignal: Int32 = 1
+            setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
+            let connected = address.withPointer { connect(client, $0, $1) } == 0
+            // A thousand requests fit in the socket's buffer, and their answers overfill the
+            // client's: the agent is still writing them when the client closes. macOS's shutdown
+            // leaves the agent's writes going, so the client closes the socket.
+            let request = AgentWire.framed(Data([AgentWire.requestIdentities]))
+            let requests = Data(repeatElement(request, count: 1000).joined())
+            let written = connected ? requests.withUnsafeBytes { write(client, $0.baseAddress, $0.count) } : -1
+            close(client)
+            try #require(connected)
+            #expect(written == requests.count)
+            #expect(eventually(within: 10) { agent.errors.contains("seward: a connection closed: ") })
+            #expect(agent.process.isRunning)
+            let listed = try home.run("/usr/bin/ssh-add", ["-L"], environment: ["SSH_AUTH_SOCK": home.socket])
+            #expect(listed.status == 0, "\(listed.errors)")
+        }
+    }
+
+    @Test func aSecondStartFindsTheLockAndExitsOne() throws {
+        try withAgent { home, agent in
+            let second = try home.run(TestHome.seward, ["agent"])
+            #expect(second.status == 1)
+            #expect(second.errors.contains("seward: \(home.path)/.ssh/seward.lock: another agent holds the lock\n"))
+            #expect(agent.process.isRunning)
+            #expect(connects(to: home.socket))
+        }
+    }
+
+    /// A port of 127.0.0.1 that nobody listens on, as the system picks for a socket bound to 0.
+    private func freePort() throws -> UInt16 {
+        let probe = socket(AF_INET, SOCK_STREAM, 0)
+        defer { close(probe) }
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let bound = withUnsafeMutablePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(probe, $0, length) == 0 && getsockname(probe, $0, &length) == 0
+            }
+        }
+        guard bound else { throw TestFailure(description: "no free port: \(String(cString: strerror(errno)))") }
+        return UInt16(bigEndian: address.sin_port)
+    }
+
+    /// Starts an sshd of the home's own on `port`, which takes the key `work` for this user, and
+    /// waits for it to listen. It runs as this user, who alone may log in to it.
+    private func startSshd(in home: TestHome, port: UInt16) throws -> Started {
+        let hostKey = try home.run(
+            "/usr/bin/ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", home.path + "/host_key"])
+        try #require(hostKey.status == 0, "\(hostKey.errors)")
+        let authorized = home.path + "/authorized_keys"
+        try FileManager.default.copyItem(atPath: home.path + "/.ssh/work.pub", toPath: authorized)
+        let config = """
+            Port \(port)
+            ListenAddress 127.0.0.1
+            HostKey \(home.path)/host_key
+            PidFile \(home.path)/sshd.pid
+            AuthorizedKeysFile \(authorized)
+            UsePAM no
+            PermitUserRC no
+            StrictModes no
+            PasswordAuthentication no
+            KbdInteractiveAuthentication no
+            LogLevel VERBOSE
+
+            """
+        try write(config, to: home.path + "/sshd_config")
+        let sshd = try home.start("/usr/sbin/sshd", ["-D", "-e", "-f", home.path + "/sshd_config"])
+        guard eventually(within: 10, { sshd.errors.contains("Server listening") }) else {
+            sshd.stop()
+            throw TestFailure(description: "sshd did not listen: \(sshd.errors)")
+        }
+        return sshd
+    }
+
     /// Runs `body` with a home that holds the key `work` and an agent that serves it, which it
     /// stops after.
     private func withAgent(_ body: (TestHome, Started) throws -> Void) throws {
