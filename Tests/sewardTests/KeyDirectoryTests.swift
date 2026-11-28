@@ -71,4 +71,15 @@ import Testing
             }
         }
     }
+
+    @Test(.enabled(if: geteuid() != 0, "root reads every file"))
+    func aFileThatCannotBeReadThrowsItsReason() throws {
+        try withTemporaryDirectory { root throws in
+            try Data("contents\n".utf8).write(to: URL(fileURLWithPath: root + "/work"))
+            #expect(chmod(root + "/work", 0) == 0)
+            #expect(throws: SystemError(path: root + "/work", code: EACCES)) {
+                try KeyDirectory.regularFileContents(root + "/work")
+            }
+        }
+    }
 }

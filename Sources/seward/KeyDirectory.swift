@@ -22,7 +22,22 @@ struct KeyDirectory {
         var info = stat()
         guard lstat(path, &info) == 0 else { throw SystemError(path: path, code: errno) }
         guard info.st_mode & S_IFMT == S_IFREG else { return nil }
-        return try Data(contentsOf: URL(fileURLWithPath: path))
+        // Opened by the descriptor, so that a link or a pipe swapped in since lstat is not followed or
+        // waited on, and every failure is the system's, with its errno.
+        let descriptor = open(path, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
+        guard descriptor >= 0 else { throw SystemError(path: path, code: errno) }
+        defer { close(descriptor) }
+        guard fstat(descriptor, &info) == 0 else { throw SystemError(path: path, code: errno) }
+        guard info.st_mode & S_IFMT == S_IFREG else { return nil }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let count = read(descriptor, &buffer, buffer.count)
+            if count < 0 && errno == EINTR { continue }
+            guard count >= 0 else { throw SystemError(path: path, code: errno) }
+            if count == 0 { return data }
+            data.append(contentsOf: buffer[0..<count])
+        }
     }
 
     /// Makes the directory, 0700, where it is missing, and leaves one that exists as it is.
