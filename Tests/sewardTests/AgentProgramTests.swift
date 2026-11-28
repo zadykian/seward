@@ -16,14 +16,28 @@ import Testing
         }
     }
 
+    @Test func aKeyThatDoesNotLoadIsSkippedAndStandardErrorSaysSo() throws {
+        try withAgent { home, agent in
+            let broken = home.path + "/.ssh/broken"
+            let damaged = KeyFile(store: .file, key: Data(repeating: 7, count: 10))
+            try damaged.encoded().write(to: URL(fileURLWithPath: broken))
+            let listed = try home.run("/usr/bin/ssh-add", ["-L"], environment: ["SSH_AUTH_SOCK": home.socket])
+            let publicKey = try String(contentsOfFile: home.path + "/.ssh/work.pub", encoding: .utf8)
+            #expect(listed.status == 0, "\(listed.errors)")
+            #expect(listed.output == publicKey)
+            #expect(agent.errors.hasPrefix("seward: skipped \(broken): its key does not load on this Mac: "))
+        }
+    }
+
     @Test func sshKeygenSignsThroughTheAgentAndItsSignatureVerifies() throws {
-        try withAgent { home, _ in
+        try withAgent { home, agent in
             let data = home.path + "/data"
             try write("signed through seward\n", to: data)
             let signed = try home.run(
                 "/usr/bin/ssh-keygen", ["-Y", "sign", "-n", "file", "-f", home.path + "/.ssh/work.pub", data],
                 environment: ["SSH_AUTH_SOCK": home.socket])
             #expect(signed.status == 0, "\(signed.errors)")
+            #expect(agent.errors == "seward: signed with the key work\n")
             let publicKey = try String(contentsOfFile: home.path + "/.ssh/work.pub", encoding: .utf8)
             try write("seward-test " + publicKey, to: home.path + "/allowed_signers")
             let verify = ["-Y", "verify", "-f", home.path + "/allowed_signers", "-I", "seward-test", "-n", "file"]
