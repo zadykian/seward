@@ -9,7 +9,7 @@ use. A key of the `file` store can: its file holds it whole, and a copy of the f
 
 ## Status
 
-In development. `seward keygen` and `seward --version` run. The other commands below are
+In development. `seward keygen`, `list`, `remove` and `--version` run. `agent`, below, is
 planned: [the issues](https://github.com/zadykian/seward/issues) hold the plan.
 
 ## Commands
@@ -40,6 +40,24 @@ every earlier version, and refuses a newer one by its number.
 
 Where the key exists alone, keygen writes its `.pub` from it. It changes nothing and exits 1
 where both exist, where `~/.ssh/NAME` is not seward's, or where the `.pub` exists alone.
+
+## Listing and removing keys
+
+`seward list` prints a line for each key file of seward's in `~/.ssh`, known by the first line of
+the file, with no header. A line holds the name, the type, the fingerprint as `ssh-keygen -l`
+prints it, and the store, with a tab between. Any other file is skipped.
+
+A file that does not load, as another Mac's, a damaged one or one of a newer format, has the store
+`error` and `-` for its type and fingerprint. So has a file that cannot be read. Its reason goes to
+the errors' stream, and `list` exits 1 once it has listed every file.
+
+`seward remove NAME` deletes whichever of `~/.ssh/NAME` and `~/.ssh/NAME.pub` exist, once you type
+the name again. `--yes` skips the question. With no terminal and no `--yes`, the call is wrong and
+exits 2. It exits 1 and deletes nothing where neither file exists, or where `~/.ssh/NAME` is not
+seward's.
+
+Deleting the file removes that copy alone: any other copy of the file, a backup's included, still
+signs on this Mac. Revoke the key at GitHub and in `authorized_keys`.
 
 ## Build and test
 
