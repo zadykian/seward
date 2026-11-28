@@ -10,6 +10,15 @@ func withTemporaryDirectory<Value>(_ body: (String) throws -> Value) throws -> V
     return try body(path)
 }
 
+/// Runs `body` with a new directory under `/tmp`, and removes it after. A socket's path holds 103
+/// bytes, and macOS's temporary directory for the user takes about half of them.
+func withShortDirectory<Value>(_ body: (String) throws -> Value) throws -> Value {
+    let path = "/tmp/seward-\(UUID().uuidString.prefix(8))"
+    try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: false)
+    defer { try? FileManager.default.removeItem(atPath: path) }
+    return try body(path)
+}
+
 /// The permission bits of what is at `path`, or nil where nothing is.
 func permissions(of path: String) -> mode_t? {
     var info = stat()
