@@ -8,8 +8,8 @@ holds a form that this Mac's Secure Enclave alone can use.
 
 ## Status
 
-Planned, with nothing built yet. [The issues](https://github.com/zadykian/seward/issues) hold the
-plan.
+In development. The package builds, and `seward --version` runs. The commands below are
+planned: [the issues](https://github.com/zadykian/seward/issues) hold the plan.
 
 ## Commands
 
